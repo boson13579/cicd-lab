@@ -1,0 +1,89 @@
+name: ci_314551081
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality Checks (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: TypeScript typecheck
+        id: typecheck
+        run: npm run typecheck
+
+      - name: Prettier format check
+        id: prettier
+        run: npm run format:check
+
+      - name: Run tests (vitest + JUnit reporter)
+        id: test
+        run: |
+          mkdir -p reports
+          npm test -- \
+            --reporter=default \
+            --reporter=junit \
+            --outputFile.junit=reports/vitest-junit-node${{ matrix.node-version }}.xml
+
+      - name: Publish test report to Actions UI
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Vitest Results (Node ${{ matrix.node-version }})
+          path: reports/vitest-junit-node${{ matrix.node-version }}.xml
+          reporter: jest-junit
+          fail-on-error: true
+
+      - name: Upload JUnit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-junit-node${{ matrix.node-version }}
+          path: reports/
+          if-no-files-found: error
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## CI Pipeline Summary - Node ${{ matrix.node-version }}"
+            echo ""
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| TypeScript typecheck | ${{ steps.typecheck.outcome }} |"
+            echo "| Prettier check | ${{ steps.prettier.outcome }} |"
+            echo "| Vitest tests | ${{ steps.test.outcome }} |"
+            echo ""
+            echo "Commit: \`${{ github.sha }}\`"
+            echo "Branch: \`${{ github.ref_name }}\`"
+            echo "Triggered by: \`${{ github.event_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

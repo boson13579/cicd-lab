@@ -1,5 +1,77 @@
 # CI/CD Lab
 
+> 學號：314551081  
+> 作業 Workflow：[`.github/workflows/ci_314551081.yaml`](.github/workflows/ci_314551081.yaml)
+
+## Homework: CI Pipeline (`ci_314551081.yaml`)
+
+本作業在原始 lab 的基礎上，新增了一條 CI Pipeline，檔案位於 [`.github/workflows/ci_314551081.yaml`](.github/workflows/ci_314551081.yaml)。
+
+### Pipeline 設計
+
+| Stage           | 指令                           | 說明                                                             |
+| --------------- | ------------------------------ | ---------------------------------------------------------------- |
+| Checkout        | `actions/checkout@v4`          | 拉取本次 commit 原始碼                                           |
+| Setup Node.js   | `actions/setup-node@v4`        | 在 Node 22 / 24 雙版本 matrix 下執行，並啟用 `cache: npm` 以加速 |
+| Install         | `npm ci`                       | 以 lockfile 為基準乾淨安裝相依套件                               |
+| **Typecheck**   | `npm run typecheck`            | TypeScript 靜態型別檢查（`tsc --noEmit`）                        |
+| **Prettier**    | `npm run format:check`         | 全專案程式碼風格檢查（不通過會直接失敗）                         |
+| **Test**        | `npm test -- --reporter=junit` | 以 vitest 執行單元測試並輸出 JUnit XML                           |
+| Publish report  | `dorny/test-reporter@v1`       | 將 JUnit 結果直接呈現在 GitHub Actions Checks UI                 |
+| Upload artifact | `actions/upload-artifact@v4`   | 保留 JUnit XML 供後續下載                                        |
+| Job summary     | `$GITHUB_STEP_SUMMARY`         | 在 workflow run 頁產生 Markdown 摘要表                           |
+
+### 觸發方式（push 自動執行）
+
+```yaml
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+```
+
+任何 branch 的 push 都會觸發；同時對 PR 與手動觸發開放。
+
+### 失敗即失敗（不會誤判為 success）
+
+每個檢查步驟都使用預設的 fail-fast 行為：
+
+- `npm run typecheck` 一旦回傳非 0 exit code，該 step 會 fail，後續步驟不再執行成功訊號。
+- `npm run format:check`、`npm test` 同上。
+- `dorny/test-reporter@v1` 設定 `fail-on-error: true`，即使測試 step 後續又 publish report，整體 job 仍會被標記失敗。
+- Matrix `fail-fast: false` 讓 Node 22 / 24 各自獨立判定，但任一版本失敗整體 workflow run 仍為紅燈。
+
+### 測試結果在 GitHub Actions 顯示
+
+使用 [`dorny/test-reporter@v1`](https://github.com/dorny/test-reporter)（Marketplace action）將 vitest 產出的 JUnit XML 解析成 GitHub Checks，會直接出現在 PR / commit / Actions run 頁面。`$GITHUB_STEP_SUMMARY` 額外提供一張各階段結果表格作為快速摘要。
+
+### 進階用法（鼓勵分數的部分）
+
+- **Matrix 多版本驗證**：同一份程式同時在 Node 22 / 24 跑，提早發現相容性問題。
+- **`concurrency` 自動取消**：對同一 ref 的新 push 會取消上一次仍在執行的 run，省 CI 時間。
+- **JUnit + Test Reporter**：將測試報告原生整合進 GitHub UI，不必下載 artifact 才看得到失敗測試。
+- **Step Summary**：以 Markdown 表格列出各階段結果，commit metadata 一目了然。
+- **Artifact 上傳**：JUnit XML 可下載做後續分析或長期保存。
+
+### 在本機驗證（不必 push 也能跑）
+
+```bash
+npm ci
+npm run typecheck
+npm run format:check
+npm test
+```
+
+或使用 `act` 模擬整條 workflow：
+
+```bash
+act push -W .github/workflows/ci_314551081.yaml
+```
+
+---
+
 這份文件是 Lab 手冊，會帶你完成：
 
 1. 啟動 Fastify 應用
